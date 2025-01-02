@@ -58,7 +58,8 @@ def createDNSRecord(token, domain, name, type, content, subdomain=None, zoneId=F
         'type': type,
         'name': fqdn,
         'content': content,
-        'ttl': ttl
+        'ttl': ttl,
+        'comment': "@managed by auto-sync script"
     }
     headers = {
         'Authorization': "Bearer {}".format(token)
