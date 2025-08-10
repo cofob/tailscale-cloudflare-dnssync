@@ -1,0 +1,47 @@
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",   # pycodestyle/pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "RET", # return
+    "ARG", # unused args
+    "SIM", # flake8-simplify
+    "PL",  # pylint rules
+]
+ignore = [
+    "E402", # imports at top-level (we may adjust later)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+ignore_missing_imports = false
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+no_implicit_optional = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+show_error_codes = true
+exclude = [".venv", "build", "dist"]

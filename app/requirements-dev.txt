@@ -1,0 +1,4 @@
+ruff==0.5.6
+mypy==1.11.2
+types-termcolor==1.1.6.2
+

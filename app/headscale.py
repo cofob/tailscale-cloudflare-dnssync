@@ -1,24 +1,37 @@
-import requests, json
-from termcolor import colored
+import json
+
+import requests
 from tailscale import alterHostname
+from termcolor import colored
+
 
 def getHeadscaleDevice(apikey, baseurl):
-    url = "{baseurl}/api/v1/machine".format(baseurl=baseurl)
-    payload={}
-    headers = {
-        "Authorization": "Bearer {apikey}".format(apikey=apikey)
-    }
+    url = f"{baseurl}/api/v1/machine"
+    payload = {}
+    headers = {"Authorization": f"Bearer {apikey}"}
     response = requests.request("GET", url, headers=headers, data=payload)
 
-    output=[]
+    output = []
 
     data = json.loads(response.text)
-    if (response.status_code == 200):
+    if response.status_code == 200:
         output = []
-        for device in data['machines']:
-            for address in device['ipAddresses']:
-                if not device['givenName'].lower().startswith('localhost'):
-                    output.append({'hostname': alterHostname(device['givenName'].split('.')[0].lower()), 'address': address})
+        for device in data["machines"]:
+            for address in device["ipAddresses"]:
+                if not device["givenName"].lower().startswith("localhost"):
+                    output.append(
+                        {
+                            "hostname": alterHostname(device["givenName"].split(".")[0].lower()),
+                            "address": address,
+                        }
+                    )
         return output
     else:
-        exit(colored("getTailscaleDevice() - {status}, {error}".format(status=str(response.status_code), error=data['message']), "red"))
+        exit(
+            colored(
+                "getTailscaleDevice() - {status}, {error}".format(
+                    status=str(response.status_code), error=data["message"]
+                ),
+                "red",
+            )
+        )

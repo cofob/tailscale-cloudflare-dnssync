@@ -1,11 +1,13 @@
-import requests, json  # type: ignore
 import ipaddress
+import json  # type: ignore
 import re
-from requests.auth import HTTPBasicAuth  # type: ignore
+
+import requests
+from config import getConfig
 from oauthlib.oauth2 import BackendApplicationClient  # type: ignore
+from requests.auth import HTTPBasicAuth  # type: ignore
 from requests_oauthlib import OAuth2Session  # type: ignore
 from termcolor import colored  # type: ignore
-from config import getConfig
 
 
 ### Get Data
@@ -17,17 +19,13 @@ def getTailscaleDevice(apikey, clientid, clientsecret, tailnet):
     if clientsecret:
         clientsecret = clientsecret.strip()
     if clientid and clientsecret:
-        token = OAuth2Session(
-            client=BackendApplicationClient(client_id=clientid)
-        ).fetch_token(
+        token = OAuth2Session(client=BackendApplicationClient(client_id=clientid)).fetch_token(
             token_url="https://api.tailscale.com/api/v2/oauth/token",
             client_id=clientid,
             client_secret=clientsecret,
         )
         apikey = token["access_token"]
-    url = "https://api.tailscale.com/api/v2/tailnet/{tailnet}/devices".format(
-        tailnet=tailnet
-    )
+    url = f"https://api.tailscale.com/api/v2/tailnet/{tailnet}/devices"
     payload = {}
     headers = {}
     response = requests.request(
@@ -68,9 +66,7 @@ def getTailscaleDevice(apikey, clientid, clientsecret, tailnet):
 
             base_name = device["name"].split(".")[0].lower()
             for address in device["addresses"]:
-                output.append(
-                    {"hostname": alterHostname(base_name), "address": address}
-                )
+                output.append({"hostname": alterHostname(base_name), "address": address})
         return output
     else:
         exit(

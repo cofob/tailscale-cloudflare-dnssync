@@ -1,6 +1,7 @@
-import configparser, os
+import configparser
+import os
 import os.path
-from sys import path
+
 from termcolor import cprint  # type: ignore
 
 keysToImport = ["cf-key", "cf-domain", "ts-tailnet"]
@@ -26,8 +27,8 @@ def importkey(name, optional=False):
 
     secretPath = "/run/secrets/" + key
     if os.path.isfile(secretPath):
-        secret = open(secretPath, "r")
-        out = "{}".format(secret.readline().strip())
+        secret = open(secretPath)
+        out = f"{secret.readline().strip()}"
         return out
     elif key in os.environ:
         return os.environ.get(key)
@@ -36,7 +37,7 @@ def importkey(name, optional=False):
     else:
         try:
             cfgPath = os.path.dirname(os.path.realpath(__file__)) + "/config.ini"
-            with open(cfgPath, "r") as file:
+            with open(cfgPath) as file:
                 config = configparser.ConfigParser()
                 config.read(cfgPath)
                 cfg = config["DEFAULT"]
@@ -52,9 +53,7 @@ def importkey(name, optional=False):
             except:
                 if optional:
                     return ""
-                cprint(
-                    "ERROR: mandatory configuration not found: {}".format(key), "red"
-                )
+                cprint(f"ERROR: mandatory configuration not found: {key}", "red")
 
 
 def getConfig():
@@ -74,9 +73,7 @@ def getConfig():
     # check for tailscale config
     if static["mode"] == "" or static["mode"] == "tailscale":
         static["mode"] = "tailscale"
-        if not static["ts-key"] and not (
-            static["ts-client-id"] and static["ts-client-secret"]
-        ):
+        if not static["ts-key"] and not (static["ts-client-id"] and static["ts-client-secret"]):
             cprint(
                 "ERROR: mandatory tailscale configuration not found: ts-key or ts-client-id/ts-client-secret missing",
                 "red",

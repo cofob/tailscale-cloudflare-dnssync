@@ -1,23 +1,21 @@
 import ipaddress
-from termcolor import colored, cprint  # type: ignore
 
 from cloudflare import (
     createDNSRecord,
     deleteDNSRecord,
+    getZoneId,
     getZoneRecords,
     isValidDNSRecord,
-    getZoneId,
 )
-from tailscale import getTailscaleDevice, isTailscaleIP, cleanHostname
 from config import getConfig
+from tailscale import cleanHostname, getTailscaleDevice, isTailscaleIP
+from termcolor import colored, cprint  # type: ignore
 
 
 def main():
     config = getConfig()
     cf_ZoneId = getZoneId(config["cf-key"], config["cf-domain"])
-    cf_recordes = getZoneRecords(
-        config["cf-key"], config["cf-domain"], zoneId=cf_ZoneId
-    )
+    cf_recordes = getZoneRecords(config["cf-key"], config["cf-domain"], zoneId=cf_ZoneId)
 
     # Get records depeneding on mode
     if config["mode"] == "tailscale":
@@ -43,9 +41,7 @@ def main():
 
     # Check if current hosts already have records:
     for ts_rec in ts_records:
-        hostname_clean = (
-            cleanHostname(ts_rec["hostname"]) if ts_rec.get("hostname") else ""
-        )
+        hostname_clean = cleanHostname(ts_rec["hostname"]) if ts_rec.get("hostname") else ""
         if not hostname_clean:
             print(
                 "[{state}]: {host} -> (empty after cleanup, skipping)".format(
@@ -62,42 +58,38 @@ def main():
         ip = ipaddress.ip_address(ts_rec["address"])
 
         # Check if dual-stack record already exists
-        if any(
-            c["name"] == tsfqdn and c["content"] == ts_rec["address"]
-            for c in cf_recordes
-        ):
+        if any(c["name"] == tsfqdn and c["content"] == ts_rec["address"] for c in cf_recordes):
             print(
                 "[{state}]: {host} -> {ip}".format(
                     host=tsfqdn, ip=ts_rec["address"], state=colored("FOUND", "green")
                 )
             )
+        elif isValidDNSRecord(hostname_clean):
+            print(
+                "[{state}]: {host} -> {ip}".format(
+                    host=tsfqdn,
+                    ip=ts_rec["address"],
+                    state=colored("ADDING", "yellow"),
+                )
+            )
+            createDNSRecord(
+                config["cf-key"],
+                config["cf-domain"],
+                hostname_clean,
+                records_typemap[ip.version],
+                ts_rec["address"],
+                subdomain=config["cf-sub"],
+                zoneId=cf_ZoneId,
+            )
         else:
-            if isValidDNSRecord(hostname_clean):
-                print(
-                    "[{state}]: {host} -> {ip}".format(
-                        host=tsfqdn,
-                        ip=ts_rec["address"],
-                        state=colored("ADDING", "yellow"),
-                    )
+            print(
+                '[{state}]: {host}.{tld} -> {ip} -> (Hostname: "{host}.{tld}" is not valid)'.format(
+                    host=hostname_clean,
+                    ip=ts_rec["address"],
+                    state=colored("SKIPING", "red"),
+                    tld=config["cf-domain"],
                 )
-                createDNSRecord(
-                    config["cf-key"],
-                    config["cf-domain"],
-                    hostname_clean,
-                    records_typemap[ip.version],
-                    ts_rec["address"],
-                    subdomain=config["cf-sub"],
-                    zoneId=cf_ZoneId,
-                )
-            else:
-                print(
-                    '[{state}]: {host}.{tld} -> {ip} -> (Hostname: "{host}.{tld}" is not valid)'.format(
-                        host=hostname_clean,
-                        ip=ts_rec["address"],
-                        state=colored("SKIPING", "red"),
-                        tld=config["cf-domain"],
-                    )
-                )
+            )
 
         # Create IPv4-only subdomain records if configured
         if config.get("cf-sub-ipv4") and ip.version == 4:
@@ -105,8 +97,7 @@ def main():
             ipv4_fqdn = hostname_clean + ipv4_sub + "." + config["cf-domain"]
 
             if any(
-                c["name"] == ipv4_fqdn and c["content"] == ts_rec["address"]
-                for c in cf_recordes
+                c["name"] == ipv4_fqdn and c["content"] == ts_rec["address"] for c in cf_recordes
             ):
                 print(
                     "[{state}]: {host} -> {ip}".format(
@@ -139,8 +130,7 @@ def main():
             ipv6_fqdn = hostname_clean + ipv6_sub + "." + config["cf-domain"]
 
             if any(
-                c["name"] == ipv6_fqdn and c["content"] == ts_rec["address"]
-                for c in cf_recordes
+                c["name"] == ipv6_fqdn and c["content"] == ts_rec["address"] for c in cf_recordes
             ):
                 print(
                     "[{state}]: {host} -> {ip}".format(
@@ -176,33 +166,22 @@ def main():
         ts_records[i]["hostname"] = ts_records[i]["hostname"].lower()
 
     for cf_rec in cf_recordes:
-        if config.get("cf-sub"):
-            sub = "." + config.get("cf-sub").lower()
-        else:
-            sub = ""
-        cf_name = cf_rec["name"].rsplit(sub + "." + config["cf-domain"], 1)[0]
+        domain = config["cf-domain"]
+        main_sub = "." + config.get("cf-sub").lower() if config.get("cf-sub") else ""
+        ipv4_sub = "." + config.get("cf-sub-ipv4").lower() if config.get("cf-sub-ipv4") else ""
+        ipv6_sub = "." + config.get("cf-sub-ipv6").lower() if config.get("cf-sub-ipv6") else ""
 
-        # Check if this is an IPv4-only subdomain record
-        if config.get("cf-sub-ipv4"):
-            ipv4_sub = "." + config.get("cf-sub-ipv4").lower()
-            if cf_rec["name"].endswith(ipv4_sub + "." + config["cf-domain"]):
-                cf_name = cf_rec["name"].rsplit(
-                    ipv4_sub + "." + config["cf-domain"], 1
-                )[0]
-                sub = ipv4_sub
-        # Check if this is an IPv6-only subdomain record
-        elif config.get("cf-sub-ipv6"):
-            ipv6_sub = "." + config.get("cf-sub-ipv6").lower()
-            if cf_rec["name"].endswith(ipv6_sub + "." + config["cf-domain"]):
-                cf_name = cf_rec["name"].rsplit(
-                    ipv6_sub + "." + config["cf-domain"], 1
-                )[0]
-                sub = ipv6_sub
-        # Check if this is the main dual-stack subdomain record
-        elif cf_rec["name"].endswith(sub.lower() + "." + config["cf-domain"]):
-            pass
+        cf_name = None
+        if ipv4_sub and cf_rec["name"].endswith(ipv4_sub + "." + domain):
+            cf_name = cf_rec["name"].rsplit(ipv4_sub + "." + domain, 1)[0]
+        elif ipv6_sub and cf_rec["name"].endswith(ipv6_sub + "." + domain):
+            cf_name = cf_rec["name"].rsplit(ipv6_sub + "." + domain, 1)[0]
+        elif main_sub and cf_rec["name"].endswith(main_sub + "." + domain):
+            cf_name = cf_rec["name"].rsplit(main_sub + "." + domain, 1)[0]
+        elif not main_sub and cf_rec["name"].endswith("." + domain):
+            cf_name = cf_rec["name"].rsplit("." + domain, 1)[0]
         else:
-            # Skip records that don't match any of our subdomains
+            # Skip records that don't match any of our managed subdomains
             continue
 
         # Ignore any records not matching our prefix/postfix
@@ -211,10 +190,7 @@ def main():
         if not cf_name.endswith(config.get("postfix", "")):
             continue
 
-        if any(
-            a["hostname"] == cf_name and a["address"] == cf_rec["content"]
-            for a in ts_records
-        ):
+        if any(a["hostname"] == cf_name and a["address"] == cf_rec["content"] for a in ts_records):
             print(
                 "[{state}]: {host} -> {ip}".format(
                     host=cf_rec["name"],
@@ -240,9 +216,7 @@ def main():
                     state=colored("DELETING", "yellow"),
                 )
             )
-            deleteDNSRecord(
-                config["cf-key"], config["cf-domain"], cf_rec["id"], zoneId=cf_ZoneId
-            )
+            deleteDNSRecord(config["cf-key"], config["cf-domain"], cf_rec["id"], zoneId=cf_ZoneId)
 
 
 if __name__ == "__main__":
