@@ -14,7 +14,6 @@ select = [
     "RET", # return
     "ARG", # unused args
     "SIM", # flake8-simplify
-    "PL",  # pylint rules
 ]
 ignore = [
     "E402", # imports at top-level (we may adjust later)
@@ -45,3 +44,7 @@ warn_unused_ignores = true
 warn_no_return = true
 show_error_codes = true
 exclude = [".venv", "build", "dist"]
+
+[[tool.mypy.overrides]]
+module = ["requests_oauthlib.*"]
+ignore_missing_imports = true

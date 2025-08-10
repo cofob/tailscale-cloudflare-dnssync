@@ -1,17 +1,20 @@
 import ipaddress
-import json  # type: ignore
+import json
 import re
+import sys
 
 import requests
 from config import getConfig
-from oauthlib.oauth2 import BackendApplicationClient  # type: ignore
-from requests.auth import HTTPBasicAuth  # type: ignore
-from requests_oauthlib import OAuth2Session  # type: ignore
-from termcolor import colored  # type: ignore
+from oauthlib.oauth2 import BackendApplicationClient
+from requests.auth import HTTPBasicAuth
+from requests_oauthlib import OAuth2Session
+from termcolor import colored
 
 
 ### Get Data
-def getTailscaleDevice(apikey, clientid, clientsecret, tailnet):
+def getTailscaleDevice(
+    apikey: str, clientid: str, clientsecret: str, tailnet: str
+) -> list[dict[str, str]]:
     if apikey:
         apikey = apikey.strip()
     if clientid:
@@ -26,8 +29,8 @@ def getTailscaleDevice(apikey, clientid, clientsecret, tailnet):
         )
         apikey = token["access_token"]
     url = f"https://api.tailscale.com/api/v2/tailnet/{tailnet}/devices"
-    payload = {}
-    headers = {}
+    payload: dict[str, str] = {}
+    headers: dict[str, str] = {}
     response = requests.request(
         "GET",
         url,
@@ -38,7 +41,7 @@ def getTailscaleDevice(apikey, clientid, clientsecret, tailnet):
     # print(response.text)
     # print(json.dumps(json.loads(response.text), indent=2))
 
-    output = []
+    output: list[dict[str, str]] = []
 
     data = json.loads(response.text)
     if response.status_code == 200:
@@ -58,45 +61,36 @@ def getTailscaleDevice(apikey, clientid, clientsecret, tailnet):
         )
 
         for device in data["devices"]:
-            device_tags = set([t.lower() for t in device.get("tags", [])])
-            if tag_filters:
+            device_tags = {t.lower() for t in device.get("tags", [])}
+            if tag_filters and device_tags.isdisjoint(tag_filters):
                 # include device only if at least one tag matches
-                if device_tags.isdisjoint(tag_filters):
-                    continue
+                continue
 
             base_name = device["name"].split(".")[0].lower()
             for address in device["addresses"]:
                 output.append({"hostname": alterHostname(base_name), "address": address})
         return output
-    else:
-        exit(
-            colored(
-                "getTailscaleDevice() - {status}, {error}".format(
-                    status=str(response.status_code), error=data["message"]
-                ),
-                "red",
-            )
+    sys.exit(
+        colored(
+            "getTailscaleDevice() - {status}, {error}".format(
+                status=str(response.status_code), error=data.get("message", "")
+            ),
+            "red",
         )
+    )
 
 
-def isTailscaleIP(ip):
-    ip = ipaddress.ip_address(ip)
+def isTailscaleIP(ip: str) -> bool:
+    parsed_ip = ipaddress.ip_address(ip)
 
-    if ip.version == 6:
-        if ip in ipaddress.IPv6Network("fd7a:115c:a1e0::/48"):
-            return True
-        else:
-            return False
-    elif ip.version == 4:
-        if ip in ipaddress.IPv4Network("100.64.0.0/10"):
-            return True
-        else:
-            return False
-    else:
-        exit("isTailscaleIP(): - unknown IP version")
+    if parsed_ip.version == 6:
+        return parsed_ip in ipaddress.IPv6Network("fd7a:115c:a1e0::/48")
+    if parsed_ip.version == 4:
+        return parsed_ip in ipaddress.IPv4Network("100.64.0.0/10")
+    sys.exit("isTailscaleIP(): - unknown IP version")
 
 
-def alterHostname(hostname):
+def alterHostname(hostname: str) -> str:
     config = getConfig()
     pre = config.get("prefix", "")
     post = config.get("postfix", "")
@@ -117,5 +111,4 @@ def cleanHostname(hostname: str) -> str:
     # collapse multiple dashes
     hn = re.sub(r"-+", "-", hn)
     # strip leading/trailing dashes and dots
-    hn = hn.strip("-.")
-    return hn
+    return hn.strip("-.")

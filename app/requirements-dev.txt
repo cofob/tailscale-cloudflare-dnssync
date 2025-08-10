@@ -1,4 +1,6 @@
 ruff==0.5.6
 mypy==1.11.2
 types-termcolor==1.1.6.2
+types-requests==2.32.0.20240712
+types-oauthlib==3.2.0.20240806
 

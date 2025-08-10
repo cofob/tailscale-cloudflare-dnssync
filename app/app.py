@@ -9,10 +9,10 @@ from cloudflare import (
 )
 from config import getConfig
 from tailscale import cleanHostname, getTailscaleDevice, isTailscaleIP
-from termcolor import colored, cprint  # type: ignore
+from termcolor import colored, cprint
 
 
-def main():
+def main() -> None:
     config = getConfig()
     cf_ZoneId = getZoneId(config["cf-key"], config["cf-domain"])
     cf_recordes = getZoneRecords(config["cf-key"], config["cf-domain"], zoneId=cf_ZoneId)
@@ -50,10 +50,8 @@ def main():
             )
             continue
         # if ts_rec['hostname'] in cf_recordes['name']:
-        if config.get("cf-sub"):
-            sub = "." + config.get("cf-sub").lower()
-        else:
-            sub = ""
+        cf_sub = config.get("cf-sub") or ""
+        sub = "." + cf_sub.lower() if cf_sub else ""
         tsfqdn = hostname_clean + sub + "." + config["cf-domain"]
         ip = ipaddress.ip_address(ts_rec["address"])
 
@@ -93,7 +91,8 @@ def main():
 
         # Create IPv4-only subdomain records if configured
         if config.get("cf-sub-ipv4") and ip.version == 4:
-            ipv4_sub = "." + config.get("cf-sub-ipv4").lower()
+            ipv4_raw = config.get("cf-sub-ipv4") or ""
+            ipv4_sub = "." + ipv4_raw.lower()
             ipv4_fqdn = hostname_clean + ipv4_sub + "." + config["cf-domain"]
 
             if any(
@@ -126,7 +125,8 @@ def main():
 
         # Create IPv6-only subdomain records if configured
         if config.get("cf-sub-ipv6") and ip.version == 6:
-            ipv6_sub = "." + config.get("cf-sub-ipv6").lower()
+            ipv6_raw = config.get("cf-sub-ipv6") or ""
+            ipv6_sub = "." + ipv6_raw.lower()
             ipv6_fqdn = hostname_clean + ipv6_sub + "." + config["cf-domain"]
 
             if any(
@@ -167,9 +167,12 @@ def main():
 
     for cf_rec in cf_recordes:
         domain = config["cf-domain"]
-        main_sub = "." + config.get("cf-sub").lower() if config.get("cf-sub") else ""
-        ipv4_sub = "." + config.get("cf-sub-ipv4").lower() if config.get("cf-sub-ipv4") else ""
-        ipv6_sub = "." + config.get("cf-sub-ipv6").lower() if config.get("cf-sub-ipv6") else ""
+        cf_sub = config.get("cf-sub") or ""
+        main_sub = "." + cf_sub.lower() if cf_sub else ""
+        ipv4_raw = config.get("cf-sub-ipv4") or ""
+        ipv4_sub = "." + ipv4_raw.lower() if ipv4_raw else ""
+        ipv6_raw = config.get("cf-sub-ipv6") or ""
+        ipv6_sub = "." + ipv6_raw.lower() if ipv6_raw else ""
 
         cf_name = None
         if ipv4_sub and cf_rec["name"].endswith(ipv4_sub + "." + domain):
@@ -200,13 +203,15 @@ def main():
             )
         else:
             if not isTailscaleIP(cf_rec["content"]):
-                print(
-                    "[{state}]: {host} -> {ip} (IP does not belong to a tailscale host. please remove manualy)".format(
-                        host=cf_rec["name"],
-                        ip=cf_rec["content"],
-                        state=colored("SKIP DELETE", "red"),
-                    )
+                msg = (
+                    "[{state}]: {host} -> {ip} (IP does not belong to a tailscale host. "
+                    "please remove manualy)"
+                ).format(
+                    host=cf_rec["name"],
+                    ip=cf_rec["content"],
+                    state=colored("SKIP DELETE", "red"),
                 )
+                print(msg)
                 continue
 
             print(

@@ -1,13 +1,15 @@
 import json
 import re
+import sys
+from typing import Any, Optional
 
 import requests
 from termcolor import colored, cprint
 
 
-def getZoneId(token, domain):
+def getZoneId(token: str, domain: str) -> str:
     url = "https://api.cloudflare.com/client/v4/zones"
-    payload = {}
+    payload: dict[str, str] = {}
     headers = {"Authorization": f"Bearer {token.strip()}"}
     response = requests.request("GET", url, headers=headers, data=payload)
     data = json.loads(response.text)
@@ -15,52 +17,59 @@ def getZoneId(token, domain):
     if data["success"]:
         for zone in data["result"]:
             if zone["name"] == domain:
-                return zone["id"]
-    else:
-        exit(colored("getZoneId(): " + json.dumps(data["errors"], indent=2)), "red")
+                return str(zone["id"])
+        sys.exit(colored(f'getZoneId(): domain "{domain}" not found', "red"))
+
+    sys.exit(colored("getZoneId(): " + json.dumps(data["errors"], indent=2), "red"))
 
 
-def getZoneRecords(token, domain, hostname=False, zoneId=False):
-    if zoneId != False:
+def getZoneRecords(token: str, domain: str, zoneId: Optional[str] = None) -> list[dict[str, Any]]:
+    if zoneId:
         url = f"https://api.cloudflare.com/client/v4/zones/{zoneId}/dns_records?per_page=150"
     else:
-        url = f"https://api.cloudflare.com/client/v4/zones/{getZoneId(token, domain)}/dns_records?per_page=150"
-    payload = {}
+        zid = getZoneId(token, domain)
+        url = f"https://api.cloudflare.com/client/v4/zones/{zid}/dns_records?per_page=150"
+    payload: dict[str, str] = {}
     headers = {"Authorization": f"Bearer {token.strip()}"}
 
     response = requests.request("GET", url, headers=headers, data=payload)
     data = json.loads(response.text)
 
-    output = []
+    output: list[dict[str, Any]] = []
 
     if data["success"]:
         for record in data["result"]:
             if record["type"] in ["A", "AAAA"]:
-                # print("{name} {ttl} in {type} {content}".format(name=record['name'], ttl=record['ttl'], type=record['type'], content=record['content']))
                 output.append(record)
         return output
-    else:
-        exit(
-            colored(
-                "getZoneRecords() - error\n{}".format(json.dumps(data["errors"], indent=2)), "red"
-            )
+
+    sys.exit(
+        colored(
+            "getZoneRecords() - error\n{}".format(json.dumps(data["errors"], indent=2)),
+            "red",
         )
+    )
 
 
 def createDNSRecord(
-    token, domain, name, type, content, subdomain=None, zoneId=False, priority=False, ttl=120
-):
-    if zoneId != False:
+    token: str,
+    domain: str,
+    name: str,
+    record_type: str,
+    content: str,
+    subdomain: Optional[str] = None,
+    zoneId: Optional[str] = None,
+    ttl: int = 120,
+) -> bool:
+    if zoneId:
         url = f"https://api.cloudflare.com/client/v4/zones/{zoneId}/dns_records"
     else:
-        url = f"https://api.cloudflare.com/client/v4/zones/{getZoneId(token, domain)}/dns_records"
-    if subdomain:
-        fqdn = name + "." + subdomain + "." + domain
-    else:
-        fqdn = name + "." + domain
+        zid = getZoneId(token, domain)
+        url = f"https://api.cloudflare.com/client/v4/zones/{zid}/dns_records"
+    fqdn = name + "." + subdomain + "." + domain if subdomain else name + "." + domain
 
-    payload = {
-        "type": type,
+    payload: dict[str, Any] = {
+        "type": record_type,
         "name": fqdn,
         "content": content,
         "ttl": ttl,
@@ -71,26 +80,26 @@ def createDNSRecord(
     response = requests.request("POST", url, headers=headers, data=json.dumps(payload))
     data = json.loads(response.text)
 
-    if data["success"] == True:
+    if data["success"]:
         print(
             "--> [CLOUDFLARE] [{code}] {msg}".format(
                 code=response.status_code, msg=colored("record created", "green")
             )
         )
         return True
-    else:
-        cprint("[ERROR]", "red")
-        exit("createDNSRecord():  " + json.dumps(data["errors"], indent=2))
+
+    cprint("[ERROR]", "red")
+    sys.exit("createDNSRecord():  " + json.dumps(data["errors"], indent=2))
 
 
-def deleteDNSRecord(token, domain, id, zoneId=False):
-    if zoneId != False:
-        url = f"https://api.cloudflare.com/client/v4/zones/{zoneId}/dns_records/{id}"
+def deleteDNSRecord(token: str, domain: str, record_id: str, zoneId: Optional[str] = None) -> None:
+    if zoneId:
+        url = f"https://api.cloudflare.com/client/v4/zones/{zoneId}/dns_records/{record_id}"
     else:
-        url = f"https://api.cloudflare.com/client/v4/zones/{getZoneId(token, domain)}/dns_records/{id}"
+        zid = getZoneId(token, domain)
+        url = f"https://api.cloudflare.com/client/v4/zones/{zid}/dns_records/{record_id}"
     headers = {"Authorization": f"Bearer {token.strip()}"}
     response = requests.request("DELETE", url, headers=headers)
-    data = json.loads(response.text)
     print(
         "--> [CLOUDFLARE] [{code}] {msg}".format(
             code=response.status_code, msg=colored("record deleted", "green")
@@ -98,9 +107,9 @@ def deleteDNSRecord(token, domain, id, zoneId=False):
     )
 
 
-def isValidDNSRecord(name):
+def isValidDNSRecord(name: str) -> bool:
     regex = r"^([a-zA-Z]|\d|-|\.)*$"
-    return re.match(regex, name)
+    return re.match(regex, name) is not None
 
 
 if __name__ == "__main__":
