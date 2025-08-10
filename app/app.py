@@ -1,7 +1,4 @@
 import ipaddress
-import json
-
-from requests.api import delete
 from termcolor import colored, cprint
 
 from cloudflare import (
@@ -13,8 +10,6 @@ from cloudflare import (
 )
 from tailscale import getTailscaleDevice, isTailscaleIP
 from config import getConfig
-
-import sys
 
 
 def main():
@@ -54,6 +49,7 @@ def main():
         else:
             sub = ""
         tsfqdn = ts_rec["hostname"].lower() + sub + "." + config["cf-domain"]
+        ip = ipaddress.ip_address(ts_rec["address"])
 
         # Check if dual-stack record already exists
         if any(
@@ -66,7 +62,6 @@ def main():
                 )
             )
         else:
-            ip = ipaddress.ip_address(ts_rec["address"])
             if isValidDNSRecord(ts_rec["hostname"]):
                 print(
                     "[{state}]: {host} -> {ip}".format(
