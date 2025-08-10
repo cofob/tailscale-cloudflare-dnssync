@@ -2,7 +2,7 @@
 
 This document tracks all changes made to this fork of `tailscale-cloudflare-dnssync` since the original fork point at commit `1dab250a0b01e508827dd55ec0345a95036848a0`.
 
-## [Unreleased] - 2025-01-XX
+## [v3] - 2025-08-10
 
 ### Added
 - **IPv4-only and IPv6-only subdomain support**: New configuration options to create separate subdomains for IPv4 and IPv6 records
@@ -11,6 +11,7 @@ This document tracks all changes made to this fork of `tailscale-cloudflare-dnss
 - **Enhanced DNS record management**: Smart filtering ensures IPv4 devices only get A records in IPv4 subdomains and IPv6 devices only get AAAA records in IPv6 subdomains
 - **Example configuration file**: Added `example.env` with comprehensive configuration examples
 - **Improved documentation**: Updated README with usage examples and configuration details
+- **Comprehensive documentation**: Added CHANGELOG.md, FORK_SUMMARY.md, and detailed commit history
 
 ### Changed
 - **Configuration structure**: Added new optional configuration keys for IPv4/IPv6 subdomains
