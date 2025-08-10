@@ -3,8 +3,15 @@ Syncs Tailscale (or Headscale) host IPs to a cloudflare hosted DNS zone.
 Basically works like Magic DNS, but with your domain.
 The main benefit for me is the ability to use letsencrypt with certbot + dns challenge
 
+## Documentation
+
+- [README.md](README.md) - This file with usage instructions
+- [FORK_SUMMARY.md](FORK_SUMMARY.md) - Overview of this fork and its purpose
+- [CHANGELOG.md](CHANGELOG.md) - Complete changelog since the fork
+
 ## Features
 - Adds ipv4 and ipv6 records for all devices
+- Creates IPv4-only and IPv6-only subdomains (configurable)
 - Removes DNS records for deleted devices
 - Updates DNS records after the hostname/alias changes
 - Add a pre- and/or postfixes to dns records
@@ -17,12 +24,15 @@ The main benefit for me is the ability to use letsencrypt with certbot + dns cha
 ```shell
 docker run --rm -it --env-file ~/git/tailscale-cloudflare-dnssync/env.txt ghcr.io/marc1307/tailscale-cloudflare-dnssync:latest
 ```
+
 Envfile:
 ```env
 # mode=<tailscale or headscale, default to tailscale if empty, optional>
 cf-key=<cloudflare api key>
 cf-domain=<cloudflare target zone>
 # cf-sub=<subdomain to use, optional>
+# cf-sub-ipv4=<IPv4-only subdomain to use, optional>
+# cf-sub-ipv6=<IPv6-only subdomain to use, optional>
 
 ts-key=<tailscale api key>
 ts-tailnet=<tailnet>
@@ -55,6 +65,8 @@ services:
       - ts_tailnet=<tailnet>
       - cf_domain=example.com
       - cf_sub=sub      # optional, uses sub domain for dns records
+      - cf_sub_ipv4=ts4 # optional, uses IPv4-only subdomain for dns records
+      - cf_sub_ipv6=ts6 # optional, uses IPv6-only subdomain for dns records
       - prefix=ts-      # optional, adds prefix to dns records
       - postfix=-ts     # optional, adds postfix to dns records
     secrets:
@@ -79,6 +91,8 @@ mode=               # optional; tailscale or headscale; defaults to tailscale
 cf-key=             # mandatory; cloudflare api key
 cf-domain=          # mandatory; cloudflare domain
 cf-sub=             # optional; add a subdomain
+cf-sub-ipv4=        # optional; add an IPv4-only subdomain
+cf-sub-ipv6=        # optional; add an IPv6-only subdomain
 
 ts-tailnet=         # mandatory in tailscale mode; tailnet name
 ts-key=             # mandatory in tailscale mode if apikey is used; tailscale api
@@ -125,3 +139,22 @@ Resource | include - specific zone - <your zone>
 1. Create a API Key using ```headscale apikeys create --expiration 90d```
 
 Docs: [Controlling headscale with remote CLI](https://github.com/juanfont/headscale/blob/main/docs/remote-cli.md#create-an-api-key)
+
+## Usage Examples
+
+### Dual-stack with IPv4-only and IPv6-only subdomains
+If you want to create multiple subdomains for different IP versions:
+
+```env
+cf-domain=cfb.wtf
+cf-sub=ts          # Creates dual-stack records: hostname.ts.cfb.wtf (A + AAAA)
+cf-sub-ipv4=ts4    # Creates IPv4-only records: hostname.ts4.cfb.wtf (A only)
+cf-sub-ipv6=ts6    # Creates IPv6-only records: hostname.ts6.cfb.wtf (AAAA only)
+```
+
+This will create:
+- `hostname.ts.cfb.wtf` - Dual-stack (both A and AAAA records)
+- `hostname.ts4.cfb.wtf` - IPv4-only (A record only)
+- `hostname.ts6.cfb.wtf` - IPv6-only (AAAA record only)
+
+Each subdomain will only contain records for devices with the appropriate IP version.
