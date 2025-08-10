@@ -7,7 +7,7 @@ def getZoneId(token, domain):
     url = "https://api.cloudflare.com/client/v4/zones"
     payload={}
     headers = {
-    'Authorization': "Bearer {}".format(token)
+    'Authorization': "Bearer {}".format(token.strip())
     }
     response = requests.request("GET", url, headers=headers, data=payload)
     data = json.loads(response.text)
@@ -27,7 +27,7 @@ def getZoneRecords(token, domain, hostname=False, zoneId=False):
         url = "https://api.cloudflare.com/client/v4/zones/{zone_identifier}/dns_records?per_page=150".format(zone_identifier=getZoneId(token, domain))
     payload={}
     headers = {
-    'Authorization': "Bearer {}".format(token)
+    'Authorization': "Bearer {}".format(token.strip())
     }
 
     response = requests.request("GET", url, headers=headers, data=payload)
@@ -62,7 +62,7 @@ def createDNSRecord(token, domain, name, type, content, subdomain=None, zoneId=F
         'comment': "@managed by auto-sync script"
     }
     headers = {
-        'Authorization': "Bearer {}".format(token)
+        'Authorization': "Bearer {}".format(token.strip())
     }
 
     response = requests.request("POST", url, headers=headers, data=json.dumps(payload))
@@ -81,7 +81,7 @@ def deleteDNSRecord(token, domain, id, zoneId=False):
     else:
         url = "https://api.cloudflare.com/client/v4/zones/{zone_identifier}/dns_records/{identifier}".format(zone_identifier=getZoneId(token, domain), identifier=id)
     headers = {
-        'Authorization': "Bearer {}".format(token)
+        'Authorization': "Bearer {}".format(token.strip())
     }
     response = requests.request("DELETE", url, headers=headers)
     data = json.loads(response.text)
