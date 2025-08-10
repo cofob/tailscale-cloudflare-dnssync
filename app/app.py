@@ -1,5 +1,5 @@
 import ipaddress
-from termcolor import colored, cprint
+from termcolor import colored, cprint  # type: ignore
 
 from cloudflare import (
     createDNSRecord,
@@ -8,7 +8,7 @@ from cloudflare import (
     isValidDNSRecord,
     getZoneId,
 )
-from tailscale import getTailscaleDevice, isTailscaleIP
+from tailscale import getTailscaleDevice, isTailscaleIP, cleanHostname
 from config import getConfig
 
 
@@ -43,12 +43,22 @@ def main():
 
     # Check if current hosts already have records:
     for ts_rec in ts_records:
+        hostname_clean = (
+            cleanHostname(ts_rec["hostname"]) if ts_rec.get("hostname") else ""
+        )
+        if not hostname_clean:
+            print(
+                "[{state}]: {host} -> (empty after cleanup, skipping)".format(
+                    host=ts_rec.get("hostname", ""), state=colored("SKIPPING", "red")
+                )
+            )
+            continue
         # if ts_rec['hostname'] in cf_recordes['name']:
         if config.get("cf-sub"):
             sub = "." + config.get("cf-sub").lower()
         else:
             sub = ""
-        tsfqdn = ts_rec["hostname"].lower() + sub + "." + config["cf-domain"]
+        tsfqdn = hostname_clean + sub + "." + config["cf-domain"]
         ip = ipaddress.ip_address(ts_rec["address"])
 
         # Check if dual-stack record already exists
@@ -62,7 +72,7 @@ def main():
                 )
             )
         else:
-            if isValidDNSRecord(ts_rec["hostname"]):
+            if isValidDNSRecord(hostname_clean):
                 print(
                     "[{state}]: {host} -> {ip}".format(
                         host=tsfqdn,
@@ -73,7 +83,7 @@ def main():
                 createDNSRecord(
                     config["cf-key"],
                     config["cf-domain"],
-                    ts_rec["hostname"],
+                    hostname_clean,
                     records_typemap[ip.version],
                     ts_rec["address"],
                     subdomain=config["cf-sub"],
@@ -82,7 +92,7 @@ def main():
             else:
                 print(
                     '[{state}]: {host}.{tld} -> {ip} -> (Hostname: "{host}.{tld}" is not valid)'.format(
-                        host=ts_rec["hostname"],
+                        host=hostname_clean,
                         ip=ts_rec["address"],
                         state=colored("SKIPING", "red"),
                         tld=config["cf-domain"],
@@ -92,9 +102,7 @@ def main():
         # Create IPv4-only subdomain records if configured
         if config.get("cf-sub-ipv4") and ip.version == 4:
             ipv4_sub = "." + config.get("cf-sub-ipv4").lower()
-            ipv4_fqdn = (
-                ts_rec["hostname"].lower() + ipv4_sub + "." + config["cf-domain"]
-            )
+            ipv4_fqdn = hostname_clean + ipv4_sub + "." + config["cf-domain"]
 
             if any(
                 c["name"] == ipv4_fqdn and c["content"] == ts_rec["address"]
@@ -118,7 +126,7 @@ def main():
                 createDNSRecord(
                     config["cf-key"],
                     config["cf-domain"],
-                    ts_rec["hostname"],
+                    hostname_clean,
                     "A",
                     ts_rec["address"],
                     subdomain=config["cf-sub-ipv4"],
@@ -128,9 +136,7 @@ def main():
         # Create IPv6-only subdomain records if configured
         if config.get("cf-sub-ipv6") and ip.version == 6:
             ipv6_sub = "." + config.get("cf-sub-ipv6").lower()
-            ipv6_fqdn = (
-                ts_rec["hostname"].lower() + ipv6_sub + "." + config["cf-domain"]
-            )
+            ipv6_fqdn = hostname_clean + ipv6_sub + "." + config["cf-domain"]
 
             if any(
                 c["name"] == ipv6_fqdn and c["content"] == ts_rec["address"]
@@ -154,7 +160,7 @@ def main():
                 createDNSRecord(
                     config["cf-key"],
                     config["cf-domain"],
-                    ts_rec["hostname"],
+                    hostname_clean,
                     "AAAA",
                     ts_rec["address"],
                     subdomain=config["cf-sub-ipv6"],

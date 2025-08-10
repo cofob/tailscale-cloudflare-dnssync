@@ -2,6 +2,22 @@
 
 This document tracks all changes made to this fork of `tailscale-cloudflare-dnssync` since the original fork point at commit `1dab250a0b01e508827dd55ec0345a95036848a0`.
 
+## [v4, Unreleased] - 2025-08-10
+
+### Added
+- **Tag filtering**: Optional filtering to sync only devices that have at least one of the specified Tailscale tags
+  - New config key: `ts-tag-filter` (comma-separated list). Accepts values with or without the `tag:` prefix, e.g. `web,prod` or `tag:web,tag:prod`.
+
+### Changed
+- **Hostname source**: Use Tailscale machine `name` (first label) instead of OS `hostname`
+- **Hostname cleanup**: Normalize labels before syncing to Cloudflare (lowercase, replace spaces/underscores with `-`, remove invalid characters, collapse dashes, trim leading/trailing `-.`)
+
+### Configuration
+```env
+# Optional: include only devices matching any of these tags
+ts-tag-filter=tag:web,tag:prod
+```
+
 ## [v3] - 2025-08-10
 
 ### Added

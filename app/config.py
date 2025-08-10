@@ -1,7 +1,7 @@
 import configparser, os
 import os.path
 from sys import path
-from termcolor import cprint
+from termcolor import cprint  # type: ignore
 
 keysToImport = ["cf-key", "cf-domain", "ts-tailnet"]
 keysOptional = [
@@ -13,6 +13,7 @@ keysOptional = [
     "ts-key",
     "ts-client-id",
     "ts-client-secret",
+    "ts-tag-filter",
     "mode",
     "hs-baseurl",
     "hs-apikey",

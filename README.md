@@ -15,6 +15,8 @@ The main benefit for me is the ability to use letsencrypt with certbot + dns cha
 - Removes DNS records for deleted devices
 - Updates DNS records after the hostname/alias changes
 - Add a pre- and/or postfixes to dns records
+- Uses Tailscale machine "name" (not OS hostname) for DNS labels
+- Optional tag filtering to include only devices with specified Tailscale tags
 - Checks if DNS records is part of tailscale network (100.64.0.0/12 or fd7a:115c:a1e0::/48) before deleting records :P
 - Support Tailscale and Headscale (tested with v0.22.3)
 
@@ -38,6 +40,7 @@ ts-key=<tailscale api key>
 ts-tailnet=<tailnet>
 # ts-clientid=<oauth clientid, optional>
 # ts-clientsecret=<oauth clientsecret, optional>
+# ts-tag-filter=tag:web,tag:prod   # optional; comma-separated list; include only devices with any of these tags
 
 # prefix=<prefix for dns records, optional>
 # postfix=<postfix for dns records, optional>
@@ -98,6 +101,7 @@ ts-tailnet=         # mandatory in tailscale mode; tailnet name
 ts-key=             # mandatory in tailscale mode if apikey is used; tailscale api
 ts-client-id=       # mandatory in tailscale mode if oauth is used; tailscale oauth client id
 ts-client-secret=   # mandatory in tailscale mode if oauth is used; tailscale oauth client secret
+ts-tag-filter=      # optional; comma-separated list of tags; devices must have at least one to be synced
 
 hs-baseurl=         # mandatory in headscale mode; headscale url
 hs-apikey=          # mandatory in headscale mode; headscale apikey
@@ -158,3 +162,16 @@ This will create:
 - `hostname.ts6.cfb.wtf` - IPv6-only (AAAA record only)
 
 Each subdomain will only contain records for devices with the appropriate IP version.
+
+### Filter by Tailscale tags
+Limit syncing to devices that have at least one of the specified tags:
+
+```env
+ts-tag-filter=tag:web,tag:prod
+```
+
+Shorthand without the `tag:` prefix is also accepted:
+
+```env
+ts-tag-filter=web,prod
+```
