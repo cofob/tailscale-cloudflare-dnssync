@@ -1,9 +1,10 @@
 import configparser
+import logging
 import os
 import os.path
 import sys
 
-from termcolor import cprint
+logger = logging.getLogger(__name__)
 
 keysToImport = ["cf-key", "cf-domain", "ts-tailnet"]
 keysOptional = [
@@ -41,7 +42,7 @@ def importkey(name: str, optional: bool = False) -> str:
             config.read(cfgPath)
             cfg = config["DEFAULT"]
     except Exception as e:
-        print(e)
+        logger.exception("could not read config file: %s", e)
         if optional:
             return ""
         sys.exit("could not read config file")
@@ -50,7 +51,7 @@ def importkey(name: str, optional: bool = False) -> str:
     except KeyError:
         if optional:
             return ""
-        cprint(f"ERROR: mandatory configuration not found: {key}", "red")
+        logger.error("ERROR: mandatory configuration not found: %s", key)
         sys.exit(1)
 
 
@@ -72,30 +73,20 @@ def getConfig() -> dict[str, str]:
     if static["mode"] == "" or static["mode"] == "tailscale":
         static["mode"] = "tailscale"
         if not static["ts-key"] and not (static["ts-client-id"] and static["ts-client-secret"]):
-            cprint(
-                "ERROR: tailscale config missing: ts-key or ts-client-id/ts-client-secret",
-                "red",
-            )
+            logger.error("ERROR: tailscale config missing: ts-key or ts-client-id/ts-client-secret")
             sys.exit(1)
     # check for headscale Config
     if static["mode"] == "headscale" and not (static["hs-baseurl"] and static["hs-apikey"]):
-        cprint(
-            "ERROR: headscale config missing: hs-baseurl and/or hs-apikey",
-            "red",
-        )
+        logger.error("ERROR: headscale config missing: hs-baseurl and/or hs-apikey")
         sys.exit(1)
     # unkown mode unfigured
     if static["mode"] not in ["", "tailscale", "headscale"]:
-        cprint(
-            "ERROR: unknown mode configured (got: {mode})".format(mode=static["mode"]),
-            "red",
-        )
+        logger.error("ERROR: unknown mode configured (got: %s)", static["mode"])
         sys.exit(1)
 
     return static
 
 
 if __name__ == "__main__":
-    from pprint import pprint
-
-    pprint(getConfig())
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logger.info(getConfig())

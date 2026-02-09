@@ -1,10 +1,12 @@
 import json
+import logging
 import re
 import sys
 from typing import Any, Optional
 
 import requests
-from termcolor import colored, cprint
+
+logger = logging.getLogger(__name__)
 
 
 def getZoneId(token: str, domain: str) -> str:
@@ -18,9 +20,11 @@ def getZoneId(token: str, domain: str) -> str:
         for zone in data["result"]:
             if zone["name"] == domain:
                 return str(zone["id"])
-        sys.exit(colored(f'getZoneId(): domain "{domain}" not found', "red"))
+        logger.error('getZoneId(): domain "%s" not found', domain)
+        sys.exit(1)
 
-    sys.exit(colored("getZoneId(): " + json.dumps(data["errors"], indent=2), "red"))
+    logger.error("getZoneId(): %s", json.dumps(data["errors"], indent=2))
+    sys.exit(1)
 
 
 def getZoneRecords(token: str, domain: str, zoneId: Optional[str] = None) -> list[dict[str, Any]]:
@@ -43,12 +47,8 @@ def getZoneRecords(token: str, domain: str, zoneId: Optional[str] = None) -> lis
                 output.append(record)
         return output
 
-    sys.exit(
-        colored(
-            "getZoneRecords() - error\n{}".format(json.dumps(data["errors"], indent=2)),
-            "red",
-        )
-    )
+    logger.error("getZoneRecords() - error\n%s", json.dumps(data["errors"], indent=2))
+    sys.exit(1)
 
 
 def createDNSRecord(
@@ -81,15 +81,11 @@ def createDNSRecord(
     data = json.loads(response.text)
 
     if data["success"]:
-        print(
-            "--> [CLOUDFLARE] [{code}] {msg}".format(
-                code=response.status_code, msg=colored("record created", "green")
-            )
-        )
+        logger.info("--> [CLOUDFLARE] [%s] record created", response.status_code)
         return True
 
-    cprint("[ERROR]", "red")
-    sys.exit("createDNSRecord():  " + json.dumps(data["errors"], indent=2))
+    logger.error("createDNSRecord(): %s", json.dumps(data["errors"], indent=2))
+    sys.exit(1)
 
 
 def deleteDNSRecord(token: str, domain: str, record_id: str, zoneId: Optional[str] = None) -> None:
@@ -100,11 +96,7 @@ def deleteDNSRecord(token: str, domain: str, record_id: str, zoneId: Optional[st
         url = f"https://api.cloudflare.com/client/v4/zones/{zid}/dns_records/{record_id}"
     headers = {"Authorization": f"Bearer {token.strip()}"}
     response = requests.request("DELETE", url, headers=headers)
-    print(
-        "--> [CLOUDFLARE] [{code}] {msg}".format(
-            code=response.status_code, msg=colored("record deleted", "green")
-        )
-    )
+    logger.info("--> [CLOUDFLARE] [%s] record deleted", response.status_code)
 
 
 def isValidDNSRecord(name: str) -> bool:
@@ -113,7 +105,8 @@ def isValidDNSRecord(name: str) -> bool:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     token = ""
     domain = ""
-    print(getZoneId(token, domain))
-    print(json.dumps(getZoneRecords(token, domain), indent=2))
+    logger.info(getZoneId(token, domain))
+    logger.info(json.dumps(getZoneRecords(token, domain), indent=2))

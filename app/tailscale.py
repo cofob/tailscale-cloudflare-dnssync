@@ -1,5 +1,6 @@
 import ipaddress
 import json
+import logging
 import re
 import sys
 
@@ -8,7 +9,8 @@ from config import getConfig
 from oauthlib.oauth2 import BackendApplicationClient
 from requests.auth import HTTPBasicAuth
 from requests_oauthlib import OAuth2Session
-from termcolor import colored
+
+logger = logging.getLogger(__name__)
 
 
 ### Get Data
@@ -38,8 +40,8 @@ def getTailscaleDevice(
         data=payload,
         auth=HTTPBasicAuth(username=apikey, password=""),
     )
-    # print(response.text)
-    # print(json.dumps(json.loads(response.text), indent=2))
+    # logger.debug(response.text)
+    # logger.debug(json.dumps(json.loads(response.text), indent=2))
 
     output: list[dict[str, str]] = []
 
@@ -70,14 +72,12 @@ def getTailscaleDevice(
             for address in device["addresses"]:
                 output.append({"hostname": alterHostname(base_name), "address": address})
         return output
-    sys.exit(
-        colored(
-            "getTailscaleDevice() - {status}, {error}".format(
-                status=str(response.status_code), error=data.get("message", "")
-            ),
-            "red",
-        )
+    logger.error(
+        "getTailscaleDevice() - %s, %s",
+        str(response.status_code),
+        data.get("message", ""),
     )
+    sys.exit(1)
 
 
 def isTailscaleIP(ip: str) -> bool:

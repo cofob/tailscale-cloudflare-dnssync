@@ -1,9 +1,11 @@
 import json
+import logging
 import sys
 
 import requests
 from tailscale import alterHostname
-from termcolor import colored
+
+logger = logging.getLogger(__name__)
 
 
 def getHeadscaleDevice(apikey: str, baseurl: str) -> list[dict[str, str]]:
@@ -27,11 +29,9 @@ def getHeadscaleDevice(apikey: str, baseurl: str) -> list[dict[str, str]]:
                         }
                     )
         return output
-    sys.exit(
-        colored(
-            "getTailscaleDevice() - {status}, {error}".format(
-                status=str(response.status_code), error=data.get("message", "")
-            ),
-            "red",
-        )
+    logger.error(
+        "getTailscaleDevice() - %s, %s",
+        str(response.status_code),
+        data.get("message", ""),
     )
+    sys.exit(1)

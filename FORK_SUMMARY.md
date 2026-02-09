@@ -19,12 +19,17 @@ The original project provided basic Tailscale/Headscale to Cloudflare DNS synchr
 - **Multi-subdomain DNS support**: Create separate subdomains for different IP versions
 - **Smart record filtering**: Automatically route records to appropriate subdomains
 - **Enhanced configuration**: More flexible configuration options
+- **Continuous operation mode**:
+  - Startup performs full sync and cleanup
+  - Every 5 minutes syncs Tailscale/Headscale changes to Cloudflare
+  - Every hour cleans up stale managed Cloudflare records
 
 ### Improvements
 - **Token handling**: Better whitespace management for API tokens
 - **Docker optimization**: Slimmer base images for reduced size
 - **CI/CD optimization**: Faster, more efficient build processes
 - **Code quality**: Better formatting and structure
+- **Logging**: Replaced print-based output with Python logging for better observability
 
 ### Documentation
 - **Comprehensive examples**: Real-world configuration examples

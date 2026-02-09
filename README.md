@@ -19,12 +19,18 @@ The main benefit for me is the ability to use letsencrypt with certbot + dns cha
 - Optional tag filtering to include only devices with specified Tailscale tags
 - Checks if DNS records is part of tailscale network (100.64.0.0/12 or fd7a:115c:a1e0::/48) before deleting records :P
 - Support Tailscale and Headscale (tested with v0.22.3)
+- Continuous sync loop:
+  - On startup: full sync + cleanup
+  - Every 5 minutes: fetch devices and apply DNS changes
+  - Every 1 hour: cleanup stale managed DNS records
 
 
 ## Run
+The service is designed to run continuously. Do not use one-shot container execution if you want ongoing sync.
+
 ### Run using docker (using env var)
 ```shell
-docker run --rm -it --env-file ~/git/tailscale-cloudflare-dnssync/env.txt ghcr.io/cofob/tailscale-cloudflare-dnssync
+docker run -d --name tailscale-cloudflare-dnssync --env-file ~/git/tailscale-cloudflare-dnssync/env.txt ghcr.io/cofob/tailscale-cloudflare-dnssync
 ```
 
 Envfile:
@@ -86,6 +92,7 @@ pip install -r app/requirements.txt
 cd app
 python app.py
 ```
+`app.py` stays running and performs periodic sync/cleanup on the schedule above.
 #### config.ini
 ```ini
 [DEFAULT]

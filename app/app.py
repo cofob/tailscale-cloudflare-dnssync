@@ -1,4 +1,6 @@
 import ipaddress
+import logging
+import time
 
 from cloudflare import (
     createDNSRecord,
@@ -9,17 +11,16 @@ from cloudflare import (
 )
 from config import getConfig
 from tailscale import cleanHostname, getTailscaleDevice, isTailscaleIP
-from termcolor import colored, cprint
+
+logger = logging.getLogger(__name__)
+
+SYNC_INTERVAL_SECONDS = 5 * 60
+CLEANUP_INTERVAL_SECONDS = 60 * 60
 
 
-def main() -> None:
-    config = getConfig()
-    cf_ZoneId = getZoneId(config["cf-key"], config["cf-domain"])
-    cf_recordes = getZoneRecords(config["cf-key"], config["cf-domain"], zoneId=cf_ZoneId)
-
-    # Get records depeneding on mode
+def get_ts_records(config: dict[str, str]) -> list[dict[str, str]]:
     if config["mode"] == "tailscale":
-        ts_records = getTailscaleDevice(
+        return getTailscaleDevice(
             config["ts-key"],
             config["ts-client-id"],
             config["ts-client-secret"],
@@ -28,48 +29,34 @@ def main() -> None:
     if config["mode"] == "headscale":
         from headscale import getHeadscaleDevice
 
-        ts_records = getHeadscaleDevice(config["hs-apikey"], config["hs-baseurl"])
+        return getHeadscaleDevice(config["hs-apikey"], config["hs-baseurl"])
+    raise ValueError(f"unsupported mode: {config['mode']}")
 
+
+def sync_records(config: dict[str, str], cf_zone_id: str, ts_records: list[dict[str, str]]) -> None:
+    cf_records = getZoneRecords(config["cf-key"], config["cf-domain"], zoneId=cf_zone_id)
     records_typemap = {4: "A", 6: "AAAA"}
 
-    print(
-        colored("runnning in ", "blue") + colored(config["mode"], "red"),
-        colored("mode", "blue") + "\n",
-    )
-
-    cprint("Adding new devices:", "blue")
-
-    # Check if current hosts already have records:
+    logger.info("Adding new devices:")
     for ts_rec in ts_records:
         hostname_clean = cleanHostname(ts_rec["hostname"]) if ts_rec.get("hostname") else ""
         if not hostname_clean:
-            print(
-                "[{state}]: {host} -> (empty after cleanup, skipping)".format(
-                    host=ts_rec.get("hostname", ""), state=colored("SKIPPING", "red")
-                )
+            logger.warning(
+                "[%s]: %s -> (empty after cleanup, skipping)",
+                "SKIPPING",
+                ts_rec.get("hostname", ""),
             )
             continue
-        # if ts_rec['hostname'] in cf_recordes['name']:
+
         cf_sub = config.get("cf-sub") or ""
         sub = "." + cf_sub.lower() if cf_sub else ""
         tsfqdn = hostname_clean + sub + "." + config["cf-domain"]
         ip = ipaddress.ip_address(ts_rec["address"])
 
-        # Check if dual-stack record already exists
-        if any(c["name"] == tsfqdn and c["content"] == ts_rec["address"] for c in cf_recordes):
-            print(
-                "[{state}]: {host} -> {ip}".format(
-                    host=tsfqdn, ip=ts_rec["address"], state=colored("FOUND", "green")
-                )
-            )
+        if any(c["name"] == tsfqdn and c["content"] == ts_rec["address"] for c in cf_records):
+            logger.info("[%s]: %s -> %s", "FOUND", tsfqdn, ts_rec["address"])
         elif isValidDNSRecord(hostname_clean):
-            print(
-                "[{state}]: {host} -> {ip}".format(
-                    host=tsfqdn,
-                    ip=ts_rec["address"],
-                    state=colored("ADDING", "yellow"),
-                )
-            )
+            logger.info("[%s]: %s -> %s", "ADDING", tsfqdn, ts_rec["address"])
             createDNSRecord(
                 config["cf-key"],
                 config["cf-domain"],
@@ -77,42 +64,28 @@ def main() -> None:
                 records_typemap[ip.version],
                 ts_rec["address"],
                 subdomain=config["cf-sub"],
-                zoneId=cf_ZoneId,
+                zoneId=cf_zone_id,
             )
         else:
-            print(
-                '[{state}]: {host}.{tld} -> {ip} -> (Hostname: "{host}.{tld}" is not valid)'.format(
-                    host=hostname_clean,
-                    ip=ts_rec["address"],
-                    state=colored("SKIPING", "red"),
-                    tld=config["cf-domain"],
-                )
+            logger.warning(
+                '[%s]: %s.%s -> %s -> (Hostname: "%s.%s" is not valid)',
+                "SKIPPING",
+                hostname_clean,
+                config["cf-domain"],
+                ts_rec["address"],
+                hostname_clean,
+                config["cf-domain"],
             )
 
-        # Create IPv4-only subdomain records if configured
         if config.get("cf-sub-ipv4") and ip.version == 4:
             ipv4_raw = config.get("cf-sub-ipv4") or ""
             ipv4_sub = "." + ipv4_raw.lower()
             ipv4_fqdn = hostname_clean + ipv4_sub + "." + config["cf-domain"]
 
-            if any(
-                c["name"] == ipv4_fqdn and c["content"] == ts_rec["address"] for c in cf_recordes
-            ):
-                print(
-                    "[{state}]: {host} -> {ip}".format(
-                        host=ipv4_fqdn,
-                        ip=ts_rec["address"],
-                        state=colored("FOUND", "green"),
-                    )
-                )
+            if any(c["name"] == ipv4_fqdn and c["content"] == ts_rec["address"] for c in cf_records):
+                logger.info("[%s]: %s -> %s", "FOUND", ipv4_fqdn, ts_rec["address"])
             else:
-                print(
-                    "[{state}]: {host} -> {ip}".format(
-                        host=ipv4_fqdn,
-                        ip=ts_rec["address"],
-                        state=colored("ADDING", "yellow"),
-                    )
-                )
+                logger.info("[%s]: %s -> %s", "ADDING", ipv4_fqdn, ts_rec["address"])
                 createDNSRecord(
                     config["cf-key"],
                     config["cf-domain"],
@@ -120,33 +93,18 @@ def main() -> None:
                     "A",
                     ts_rec["address"],
                     subdomain=config["cf-sub-ipv4"],
-                    zoneId=cf_ZoneId,
+                    zoneId=cf_zone_id,
                 )
 
-        # Create IPv6-only subdomain records if configured
         if config.get("cf-sub-ipv6") and ip.version == 6:
             ipv6_raw = config.get("cf-sub-ipv6") or ""
             ipv6_sub = "." + ipv6_raw.lower()
             ipv6_fqdn = hostname_clean + ipv6_sub + "." + config["cf-domain"]
 
-            if any(
-                c["name"] == ipv6_fqdn and c["content"] == ts_rec["address"] for c in cf_recordes
-            ):
-                print(
-                    "[{state}]: {host} -> {ip}".format(
-                        host=ipv6_fqdn,
-                        ip=ts_rec["address"],
-                        state=colored("FOUND", "green"),
-                    )
-                )
+            if any(c["name"] == ipv6_fqdn and c["content"] == ts_rec["address"] for c in cf_records):
+                logger.info("[%s]: %s -> %s", "FOUND", ipv6_fqdn, ts_rec["address"])
             else:
-                print(
-                    "[{state}]: {host} -> {ip}".format(
-                        host=ipv6_fqdn,
-                        ip=ts_rec["address"],
-                        state=colored("ADDING", "yellow"),
-                    )
-                )
+                logger.info("[%s]: %s -> %s", "ADDING", ipv6_fqdn, ts_rec["address"])
                 createDNSRecord(
                     config["cf-key"],
                     config["cf-domain"],
@@ -154,18 +112,22 @@ def main() -> None:
                     "AAAA",
                     ts_rec["address"],
                     subdomain=config["cf-sub-ipv6"],
-                    zoneId=cf_ZoneId,
+                    zoneId=cf_zone_id,
                 )
 
-    cprint("Cleaning up old records:", "blue")
-    # Check for old records:
-    cf_recordes = getZoneRecords(config["cf-key"], config["cf-domain"])
 
-    # set tailscale hostnames to lower cause dns is
-    for i in range(len(ts_records)):
-        ts_records[i]["hostname"] = ts_records[i]["hostname"].lower()
+def cleanup_records(config: dict[str, str], cf_zone_id: str, ts_records: list[dict[str, str]]) -> None:
+    logger.info("Cleaning up old records:")
+    cf_records = getZoneRecords(config["cf-key"], config["cf-domain"], zoneId=cf_zone_id)
 
-    for cf_rec in cf_recordes:
+    normalized_ts_records: list[dict[str, str]] = []
+    for ts_rec in ts_records:
+        hostname_clean = cleanHostname(ts_rec.get("hostname", "")).lower()
+        if not hostname_clean:
+            continue
+        normalized_ts_records.append({"hostname": hostname_clean, "address": ts_rec["address"]})
+
+    for cf_rec in cf_records:
         domain = config["cf-domain"]
         cf_sub = config.get("cf-sub") or ""
         main_sub = "." + cf_sub.lower() if cf_sub else ""
@@ -184,45 +146,77 @@ def main() -> None:
         elif not main_sub and cf_rec["name"].endswith("." + domain):
             cf_name = cf_rec["name"].rsplit("." + domain, 1)[0]
         else:
-            # Skip records that don't match any of our managed subdomains
             continue
 
-        # Ignore any records not matching our prefix/postfix
         if not cf_name.startswith(config.get("prefix", "")):
             continue
         if not cf_name.endswith(config.get("postfix", "")):
             continue
 
-        if any(a["hostname"] == cf_name and a["address"] == cf_rec["content"] for a in ts_records):
-            print(
-                "[{state}]: {host} -> {ip}".format(
-                    host=cf_rec["name"],
-                    ip=cf_rec["content"],
-                    state=colored("IN USE", "green"),
-                )
-            )
+        if any(
+            a["hostname"] == cf_name and a["address"] == cf_rec["content"]
+            for a in normalized_ts_records
+        ):
+            logger.info("[%s]: %s -> %s", "IN USE", cf_rec["name"], cf_rec["content"])
         else:
             if not isTailscaleIP(cf_rec["content"]):
-                msg = (
-                    "[{state}]: {host} -> {ip} (IP does not belong to a tailscale host. "
-                    "please remove manualy)"
-                ).format(
-                    host=cf_rec["name"],
-                    ip=cf_rec["content"],
-                    state=colored("SKIP DELETE", "red"),
+                logger.warning(
+                    "[%s]: %s -> %s (IP does not belong to a tailscale host. please remove manualy)",
+                    "SKIP DELETE",
+                    cf_rec["name"],
+                    cf_rec["content"],
                 )
-                print(msg)
                 continue
 
-            print(
-                "[{state}]: {host} -> {ip}".format(
-                    host=cf_rec["name"],
-                    ip=cf_rec["content"],
-                    state=colored("DELETING", "yellow"),
-                )
-            )
-            deleteDNSRecord(config["cf-key"], config["cf-domain"], cf_rec["id"], zoneId=cf_ZoneId)
+            logger.info("[%s]: %s -> %s", "DELETING", cf_rec["name"], cf_rec["content"])
+            deleteDNSRecord(config["cf-key"], config["cf-domain"], cf_rec["id"], zoneId=cf_zone_id)
+
+
+def main() -> None:
+    config = getConfig()
+    cf_zone_id = getZoneId(config["cf-key"], config["cf-domain"])
+    logger.info("running in %s mode", config["mode"])
+    logger.info(
+        "poll intervals: sync=%ss cleanup=%ss",
+        SYNC_INTERVAL_SECONDS,
+        CLEANUP_INTERVAL_SECONDS,
+    )
+
+    ts_records = get_ts_records(config)
+    sync_records(config, cf_zone_id, ts_records)
+    cleanup_records(config, cf_zone_id, ts_records)
+
+    next_sync = time.monotonic() + SYNC_INTERVAL_SECONDS
+    next_cleanup = time.monotonic() + CLEANUP_INTERVAL_SECONDS
+    last_ts_records = ts_records
+
+    while True:
+        now = time.monotonic()
+
+        if now >= next_sync:
+            try:
+                last_ts_records = get_ts_records(config)
+                sync_records(config, cf_zone_id, last_ts_records)
+            except SystemExit as exc:
+                logger.error("sync cycle failed: %s", exc)
+            while next_sync <= now:
+                next_sync += SYNC_INTERVAL_SECONDS
+
+        if now >= next_cleanup:
+            try:
+                cleanup_records(config, cf_zone_id, last_ts_records)
+            except SystemExit as exc:
+                logger.error("cleanup cycle failed: %s", exc)
+            while next_cleanup <= now:
+                next_cleanup += CLEANUP_INTERVAL_SECONDS
+
+        sleep_for = max(1.0, min(next_sync, next_cleanup) - time.monotonic())
+        time.sleep(sleep_for)
 
 
 if __name__ == "__main__":
-    main()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("shutdown requested")
