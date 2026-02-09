@@ -1,6 +1,12 @@
 import ipaddress
+import json
 import logging
+import hmac
+import hashlib
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Optional
 
 from cloudflare import (
     createDNSRecord,
@@ -16,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 SYNC_INTERVAL_SECONDS = 5 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
+WEBHOOK_DEFAULT_LISTEN = "0.0.0.0"
+WEBHOOK_DEFAULT_PORT = 8080
+WEBHOOK_DEFAULT_PATH = "/tailscale/webhook"
+WEBHOOK_DEFAULT_MAX_AGE_SECONDS = 300
+
+
+class WebhookSettings:
+    def __init__(self, listen: str, port: int, path: str, secret: str, max_age_seconds: int):
+        self.listen = listen
+        self.port = port
+        self.path = path
+        self.secret = secret
+        self.max_age_seconds = max_age_seconds
 
 
 def get_ts_records(config: dict[str, str]) -> list[dict[str, str]]:
@@ -31,6 +50,160 @@ def get_ts_records(config: dict[str, str]) -> list[dict[str, str]]:
 
         return getHeadscaleDevice(config["hs-apikey"], config["hs-baseurl"])
     raise ValueError(f"unsupported mode: {config['mode']}")
+
+
+def parse_bool(raw_value: str) -> bool:
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_webhook_settings(config: dict[str, str]) -> Optional[WebhookSettings]:
+    enabled = parse_bool(config.get("ts-webhook-enabled", ""))
+    if not enabled:
+        return None
+
+    secret = (config.get("ts-webhook-secret") or "").strip()
+    if not secret:
+        logger.error("ts-webhook-enabled=true requires ts-webhook-secret")
+        raise SystemExit(1)
+
+    listen = (config.get("ts-webhook-listen") or WEBHOOK_DEFAULT_LISTEN).strip()
+    path = (config.get("ts-webhook-path") or WEBHOOK_DEFAULT_PATH).strip()
+    if not path.startswith("/"):
+        path = "/" + path
+
+    try:
+        port = int((config.get("ts-webhook-port") or str(WEBHOOK_DEFAULT_PORT)).strip())
+    except ValueError as exc:
+        logger.error("invalid ts-webhook-port: %s", exc)
+        raise SystemExit(1) from exc
+
+    try:
+        max_age_seconds = int(
+            (config.get("ts-webhook-max-age-seconds") or str(WEBHOOK_DEFAULT_MAX_AGE_SECONDS)).strip()
+        )
+    except ValueError as exc:
+        logger.error("invalid ts-webhook-max-age-seconds: %s", exc)
+        raise SystemExit(1) from exc
+
+    return WebhookSettings(
+        listen=listen,
+        port=port,
+        path=path,
+        secret=secret,
+        max_age_seconds=max_age_seconds,
+    )
+
+
+def verify_webhook_signature(
+    signature_header: str,
+    secret: str,
+    body: bytes,
+    max_age_seconds: int,
+) -> bool:
+    parts: dict[str, list[str]] = {}
+    for part in signature_header.split(","):
+        key, sep, value = part.strip().partition("=")
+        if sep and key and value:
+            parts.setdefault(key, []).append(value)
+
+    ts_values = parts.get("t", [])
+    sig_v1_values = parts.get("v1", [])
+    if not ts_values or not sig_v1_values:
+        return False
+
+    try:
+        ts = int(ts_values[0])
+    except ValueError:
+        return False
+
+    if abs(int(time.time()) - ts) > max_age_seconds:
+        return False
+
+    payload = str(ts).encode("utf-8") + b"." + body
+    expected = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+    return any(hmac.compare_digest(expected, candidate) for candidate in sig_v1_values)
+
+
+def create_webhook_handler(
+    settings: WebhookSettings,
+    request_sync: threading.Event,
+) -> type[BaseHTTPRequestHandler]:
+    class TailscaleWebhookHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path != settings.path:
+                self.send_response(404)
+                self.end_headers()
+                return
+
+            signature_header = self.headers.get("Tailscale-Webhook-Signature", "")
+            content_length_raw = self.headers.get("Content-Length", "0")
+            try:
+                content_length = int(content_length_raw)
+            except ValueError:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b"invalid content length")
+                return
+
+            body = self.rfile.read(content_length)
+            if not verify_webhook_signature(
+                signature_header=signature_header,
+                secret=settings.secret,
+                body=body,
+                max_age_seconds=settings.max_age_seconds,
+            ):
+                self.send_response(401)
+                self.end_headers()
+                self.wfile.write(b"invalid signature")
+                return
+
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b"invalid json")
+                return
+
+            event_types: list[str] = []
+            if isinstance(payload, list):
+                for item in payload:
+                    if isinstance(item, dict):
+                        event_type = item.get("type")
+                        if isinstance(event_type, str):
+                            event_types.append(event_type)
+            elif isinstance(payload, dict):
+                event_type = payload.get("type")
+                if isinstance(event_type, str):
+                    event_types.append(event_type)
+
+            logger.info("webhook accepted, events=%s", ",".join(event_types) if event_types else "unknown")
+            request_sync.set()
+            self.send_response(202)
+            self.end_headers()
+            self.wfile.write(b"accepted")
+
+        def log_message(self, fmt: str, *args: object) -> None:
+            logger.debug("webhook_http: " + fmt, *args)
+
+    return TailscaleWebhookHandler
+
+
+def start_webhook_server(
+    settings: WebhookSettings,
+    request_sync: threading.Event,
+) -> ThreadingHTTPServer:
+    handler = create_webhook_handler(settings, request_sync)
+    server = ThreadingHTTPServer((settings.listen, settings.port), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="tailscale-webhook")
+    thread.start()
+    logger.info(
+        "webhook listener enabled at http://%s:%s%s",
+        settings.listen,
+        settings.port,
+        settings.path,
+    )
+    return server
 
 
 def sync_records(config: dict[str, str], cf_zone_id: str, ts_records: list[dict[str, str]]) -> None:
@@ -175,6 +348,15 @@ def cleanup_records(config: dict[str, str], cf_zone_id: str, ts_records: list[di
 def main() -> None:
     config = getConfig()
     cf_zone_id = getZoneId(config["cf-key"], config["cf-domain"])
+    webhook_settings = parse_webhook_settings(config)
+    sync_requested = threading.Event()
+    webhook_server = None
+    if webhook_settings:
+        if config["mode"] != "tailscale":
+            logger.warning("webhook listener is only supported in tailscale mode; disabled")
+        else:
+            webhook_server = start_webhook_server(webhook_settings, sync_requested)
+
     logger.info("running in %s mode", config["mode"])
     logger.info(
         "poll intervals: sync=%ss cleanup=%ss",
@@ -190,28 +372,42 @@ def main() -> None:
     next_cleanup = time.monotonic() + CLEANUP_INTERVAL_SECONDS
     last_ts_records = ts_records
 
-    while True:
-        now = time.monotonic()
+    try:
+        while True:
+            now = time.monotonic()
 
-        if now >= next_sync:
-            try:
-                last_ts_records = get_ts_records(config)
-                sync_records(config, cf_zone_id, last_ts_records)
-            except SystemExit as exc:
-                logger.error("sync cycle failed: %s", exc)
-            while next_sync <= now:
-                next_sync += SYNC_INTERVAL_SECONDS
+            if sync_requested.is_set():
+                sync_requested.clear()
+                try:
+                    last_ts_records = get_ts_records(config)
+                    sync_records(config, cf_zone_id, last_ts_records)
+                except SystemExit as exc:
+                    logger.error("webhook-triggered sync failed: %s", exc)
+                now = time.monotonic()
 
-        if now >= next_cleanup:
-            try:
-                cleanup_records(config, cf_zone_id, last_ts_records)
-            except SystemExit as exc:
-                logger.error("cleanup cycle failed: %s", exc)
-            while next_cleanup <= now:
-                next_cleanup += CLEANUP_INTERVAL_SECONDS
+            if now >= next_sync:
+                try:
+                    last_ts_records = get_ts_records(config)
+                    sync_records(config, cf_zone_id, last_ts_records)
+                except SystemExit as exc:
+                    logger.error("sync cycle failed: %s", exc)
+                while next_sync <= now:
+                    next_sync += SYNC_INTERVAL_SECONDS
 
-        sleep_for = max(1.0, min(next_sync, next_cleanup) - time.monotonic())
-        time.sleep(sleep_for)
+            if now >= next_cleanup:
+                try:
+                    cleanup_records(config, cf_zone_id, last_ts_records)
+                except SystemExit as exc:
+                    logger.error("cleanup cycle failed: %s", exc)
+                while next_cleanup <= now:
+                    next_cleanup += CLEANUP_INTERVAL_SECONDS
+
+            sleep_for = max(1.0, min(next_sync, next_cleanup) - time.monotonic())
+            sync_requested.wait(timeout=sleep_for)
+    finally:
+        if webhook_server:
+            webhook_server.shutdown()
+            webhook_server.server_close()
 
 
 if __name__ == "__main__":

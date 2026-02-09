@@ -47,6 +47,12 @@ ts-tailnet=<tailnet>
 # ts-clientid=<oauth clientid, optional>
 # ts-clientsecret=<oauth clientsecret, optional>
 # ts-tag-filter=tag:web,tag:prod   # optional; comma-separated list; include only devices with any of these tags
+# ts-webhook-enabled=true                    # optional; enable webhook-triggered immediate sync (tailscale mode)
+# ts-webhook-secret=<webhook secret>         # required if ts-webhook-enabled=true
+# ts-webhook-listen=0.0.0.0                  # optional; default 0.0.0.0
+# ts-webhook-port=8080                       # optional; default 8080
+# ts-webhook-path=/tailscale/webhook         # optional; default /tailscale/webhook
+# ts-webhook-max-age-seconds=300             # optional; signature timestamp tolerance
 
 # prefix=<prefix for dns records, optional>
 # postfix=<postfix for dns records, optional>
@@ -109,6 +115,12 @@ ts-key=             # mandatory in tailscale mode if apikey is used; tailscale a
 ts-client-id=       # mandatory in tailscale mode if oauth is used; tailscale oauth client id
 ts-client-secret=   # mandatory in tailscale mode if oauth is used; tailscale oauth client secret
 ts-tag-filter=      # optional; comma-separated list of tags; devices must have at least one to be synced
+ts-webhook-enabled= # optional; true/false. Enables webhook-triggered immediate sync in tailscale mode
+ts-webhook-secret=  # required when ts-webhook-enabled=true
+ts-webhook-listen=  # optional; listen address, default 0.0.0.0
+ts-webhook-port=    # optional; listen port, default 8080
+ts-webhook-path=    # optional; webhook path, default /tailscale/webhook
+ts-webhook-max-age-seconds= # optional; signature timestamp tolerance, default 300
 
 hs-baseurl=         # mandatory in headscale mode; headscale url
 hs-apikey=          # mandatory in headscale mode; headscale apikey
@@ -124,6 +136,44 @@ cf-domain=<cloudflare target zone>
 hs-baseurl=https://headscale.example.com
 hs-apikey=≤headscale api key>
 ```
+
+## Configure Tailscale webhook (hybrid mode)
+When webhook mode is enabled, this app accepts signed `POST` webhooks and triggers immediate sync, while still keeping periodic polling as fallback.
+Reference: Tailscale Webhooks docs: https://tailscale.com/kb/1213/webhooks/
+
+### 1. Enable webhook listener in this app
+Set these values (env/config):
+
+```env
+ts-webhook-enabled=true
+ts-webhook-secret=<set after creating endpoint in Tailscale>
+ts-webhook-listen=0.0.0.0
+ts-webhook-port=8080
+ts-webhook-path=/tailscale/webhook
+ts-webhook-max-age-seconds=300
+```
+
+### 2. Expose HTTPS publicly (required by Tailscale)
+Tailscale webhooks require an HTTPS endpoint on external port `80` or `443`.
+Because this app listens HTTP internally (default `:8080`), place it behind a reverse proxy (nginx/traefik/caddy/cloudflared) and route:
+
+`https://your-domain.example/tailscale/webhook` -> `http://<this-container>:8080/tailscale/webhook`
+
+### 3. Create endpoint in Tailscale admin console
+1. Open the **Webhooks** page in the Tailscale admin console.
+2. Select **Add endpoint**.
+3. Set **Webhook URL** to your public HTTPS URL, for example:
+   `https://your-domain.example/tailscale/webhook`
+4. Destination: choose **None** (generic Tailscale payload format).
+5. Select event categories/events you want (node lifecycle events are recommended).
+6. Select **Add endpoint**.
+7. Copy the generated **Webhook secret** from the popup and set it as `ts-webhook-secret` in this app.
+8. Use the endpoint menu (`...`) -> **Test endpoint** -> **Send test event** and verify logs show webhook accepted.
+
+### 4. Recommended operations model
+- Keep webhook mode enabled for near real-time updates.
+- Keep periodic sync enabled (default every 5 minutes) as a safety net.
+- Keep hourly cleanup enabled for stale managed records.
 
 ## How to get API Keys
 ### Cloudflare
